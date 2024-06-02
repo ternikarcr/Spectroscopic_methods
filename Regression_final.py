@@ -6,14 +6,12 @@ Created on Fri Feb  3 18:09:00 2023
 @author: chirag
 """
 ####FINAL####
-#1
-#Import packages
+#1 #Import packages
 import sys
 from sys import stdout
 import os
 import glob
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
 from numpy.linalg import inv
 from scipy.stats import chi2
@@ -30,7 +28,6 @@ from sklearn.cross_decomposition import PLSRegression
 from sklearn.model_selection import cross_val_predict
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import r2_score
-from spectres import spectres
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
 import time
@@ -45,12 +42,11 @@ from sklearn.svm import SVC
 svm = SVC()
 from sklearn.ensemble import RandomForestClassifier
 rf = RandomForestClassifier()
+from sklearn.model_selection import LeaveOneOut
 
-
-#2
-#Data Import
+#2 #Data Import
 #Set path
-path = '/home/chirag/Documents/HSI/Soil/Paper_2_Quantitative'
+path = 'D:/Academics/PhD/SEM 9/Paper_2_Soil_texture_quantitative/Draft2/Codes'
 os.chdir(path)
 file = 'Working_lab.csv'
 #Data Import
@@ -61,8 +57,7 @@ df['Texture'] = df['Texture'].map(dict)
 df = df.drop(df.iloc[:, 5:55], axis = 1)
 
 
-#3
-#Definition of various functions
+#3 #Definition of various functions
 #PLS function
 def optimise_pls_cv(X0, y0, X1, y1, n_comp, plot_components):
     mse = []
@@ -158,107 +153,133 @@ def optimise_pls_cv(X0, y0, X1, y1, n_comp, plot_components):
     metrics_final = np.array([n_comp_final, r2_cv, rmse_cv, r2_c, rmse_c, rpd_c, rpiq_c, bias_c, r2_v, rmse_v, rpd_v, rpiq_v, bias_v])
     return metrics_final, y0_p, y1_p
 
+def optimise_pls_cv1(X0, y0, X1, y1, n_comp):
+    mse = []
+    n_comp_final = []
+    component = np.arange(1, n_comp)
+    loocv = y0.shape[0] - 1
+    for i in component:
+        pls = PLSRegression(n_components=i, scale=False, copy=False)
+        y0_p_cv = cross_val_predict(pls, X0, y0, cv=loocv)
+        mse.append(mean_squared_error(y0, y0_p_cv))
+        comp = 100*(i+1)/n_comp
+        stdout.write("\r%d%% completed" % comp)
+        stdout.flush()
+    stdout.write("\n")
+    #Calculate and print the position of minimum in MSE
+    msemin = np.argmin(mse)
+    n_comp_final = msemin+1
+    #print("Suggested number of components: ", n_comp_final)
+    stdout.write("\n")
+    #Define PLS object with optimal number of components
+    pls_opt = PLSRegression(n_components=n_comp_final, scale=False)
+    #Fit to the entire calibration dataset
+    pls_opt.fit(X0, y0)
+    y0_p = pls_opt.predict(X0)
+    #Formatting for easy calculations
+    y0_p = pd.Series(y0_p[:,0], index=y0.index)
+    #Fit to the entire validation dataset
+    y1_p = pls_opt.predict(X1)
+    #Formatting for easy calculations
+    y1_p = pd.Series(y1_p[:,0], index=y1.index)
+    return y0_p, y1_p
+
+def log_ratio_pred(y_c_si_cl, y_c_sa_cl):
+    y_silt_pred = 100 * np.exp(y_c_si_cl)/(np.exp(y_c_si_cl) + np.exp(y_c_sa_cl) +1)
+    y_sand_pred = 100 * np.exp(y_c_sa_cl)/(np.exp(y_c_si_cl) + np.exp(y_c_sa_cl) +1)
+    y_clay_pred = 100 * 1/(np.exp(y_c_si_cl) + np.exp(y_c_sa_cl) +1)
+    return y_clay_pred, y_silt_pred, y_sand_pred
+
+def regression_metrics(y0, y0_p, y1, y1_p):
+    ssr_c = np.sum(np.square(y0-y0_p))
+    sst_c = np.sum(np.square(y0-np.mean(y0)))
+    r2_c = 1-(ssr_c/sst_c)
+    rmse_c = np.sqrt((np.sum(np.square(y0-y0_p)))/len(y0))
+    sd_c = np.std(y0)
+    iqr_c = np.percentile(y0,75,interpolation='midpoint') - np.percentile(y0,25,interpolation='midpoint')
+    rpd_c = sd_c/rmse_c
+    rpiq_c = iqr_c/rmse_c
+    bias_c = np.mean(y0_p) - np.mean(y0)
+    ssr_v = np.sum(np.square(y1-y1_p))
+    sst_v = np.sum(np.square(y1-np.mean(y1)))
+    r2_v = 1-(ssr_v/sst_v)
+    rmse_v = np.sqrt((np.sum(np.square(y1-y1_p)))/len(y1))
+    sd_v = np.std(y1)
+    iqr_v = np.percentile(y1,75,interpolation='midpoint') - np.percentile(y1,25,interpolation='midpoint')
+    rpd_v = sd_v/rmse_v
+    rpiq_v = iqr_v/rmse_v
+    bias_v = np.mean(y1_p) - np.mean(y1)
+    metrics_final = np.array([r2_c, rmse_c, rpd_c, rpiq_c, bias_c, r2_v, rmse_v, rpd_v, rpiq_v, bias_v])
+    return metrics_final
+
+def optimise_pls_cv2(X0, y0, n_comp):
+    ms_tr_aa = []
+    component = np.arange(1, n_comp)
+    loocv = y0.shape[0] - 1
+    for i in component:
+        pls = PLSRegression(n_components=i, scale=False, copy=False)
+        y0_p_cv = cross_val_predict(pls, X0, y0, cv=loocv)
+        dict = {0:'Cl', 1:'ClLo', 2:'LoSa', 3:'SaCl', 4:'SaClLo', 5:'SaLo'}
+        y01 = pd.DataFrame(np.argmax(y0.to_numpy(dtype='float64'), axis = 1))[0].map(dict)
+        y0_p_cv1 = pd.DataFrame(np.argmax(y0_p_cv, axis = 1))[0].map(dict)
+        ms_tr_aa.append(balanced_accuracy_score(y01, y0_p_cv1))
+        comp = 100*(i+1)/n_comp
+        stdout.write("\r%d%% completed" % comp)
+        stdout.flush()
+    stdout.write("\n")
+    #Calculate and print the position of minimum in MSE
+    msemax = np.argmax(ms_tr_aa)
+    n_comp_final = msemax+1
+    return n_comp_final
+
 #Classification functions
-#LR
-def c_lr(X_train2, Y_train2, X_test2, Y_test2):
-    tr_oa, t_oa, tr_aa, t_aa, tr_k, t_k, tr_na, t_na, tr_ana, t_ana = [[] for _ in range(10)]
-    #LR
-    logreg.fit(X_train2, Y_train2)
-    Y_train_pred = logreg.predict(X_train2)
-    tr_oa = accuracy_score(Y_train2, Y_train_pred)
-    tr_aa = balanced_accuracy_score(Y_train2, Y_train_pred)
-    tr_k = cohen_kappa_score(Y_train2, Y_train_pred)
-    tr_con = confusion_matrix(Y_train2, Y_train_pred, labels = seq_texture)
-    tr_na = (np.sum(tr_con * neigh1))/np.sum(tr_con)
-    tr_ana = (np.sum(tr_con * neigh2))/np.sum(tr_con)
-    Y_test_pred = logreg.predict(X_test2)
-    t_oa = accuracy_score(Y_test2, Y_test_pred)
-    t_aa = balanced_accuracy_score(Y_test2, Y_test_pred)
-    t_k = cohen_kappa_score(Y_test2, Y_test_pred)
-    t_con = confusion_matrix(Y_test2, Y_test_pred, labels = seq_texture)
-    t_na = (np.sum(t_con * neigh1))/np.sum(t_con)
-    t_ana = (np.sum(t_con * neigh2))/np.sum(t_con)
-    metrics = []
-    metrics = np.array([tr_oa, tr_aa, tr_k, tr_na, tr_ana, t_oa, t_aa, t_k, t_na, t_ana])
-    return metrics, tr_con, t_con
-
-#LDA
-def c_lda(X_train2, Y_train2, X_test2, Y_test2):
-    tr_oa, t_oa, tr_aa, t_aa, tr_k, t_k, tr_na, t_na, tr_ana, t_ana = [[] for _ in range(10)]
-    #LDA
-    lda.fit(X_train2, Y_train2)
-    Y_train_pred = lda.predict(X_train2)
-    tr_oa = accuracy_score(Y_train2, Y_train_pred)
-    tr_aa = balanced_accuracy_score(Y_train2, Y_train_pred)
-    tr_k = cohen_kappa_score(Y_train2, Y_train_pred)
-    tr_con = confusion_matrix(Y_train2, Y_train_pred, labels = seq_texture)
-    tr_na = (np.sum(tr_con * neigh1))/np.sum(tr_con)
-    tr_ana = (np.sum(tr_con * neigh2))/np.sum(tr_con)
-    Y_test_pred = lda.predict(X_test2)
-    t_oa = accuracy_score(Y_test2, Y_test_pred)
-    t_aa = balanced_accuracy_score(Y_test2, Y_test_pred)
-    t_k = cohen_kappa_score(Y_test2, Y_test_pred)
-    t_con = confusion_matrix(Y_test2, Y_test_pred, labels = seq_texture)
-    t_na = (np.sum(t_con * neigh1))/np.sum(t_con)
-    t_ana = (np.sum(t_con * neigh2))/np.sum(t_con)
-    metrics = []
-    metrics = np.array([tr_oa, tr_aa, tr_k, tr_na, tr_ana, t_oa, t_aa, t_k, t_na, t_ana])
-    return metrics, tr_con, t_con
-
-##SVM
-def c_svm(X_train2, Y_train2, X_test2, Y_test2):
-    tr_oa, t_oa, tr_aa, t_aa, tr_k, t_k, tr_na, t_na, tr_ana, t_ana = [[] for _ in range(10)]
-    #SVM
-    svm.fit(X_train2, Y_train2)
-    Y_train_pred = svm.predict(X_train2)
-    tr_oa = accuracy_score(Y_train2, Y_train_pred)
-    tr_aa = balanced_accuracy_score(Y_train2, Y_train_pred)
-    tr_k = cohen_kappa_score(Y_train2, Y_train_pred)
-    tr_con = confusion_matrix(Y_train2, Y_train_pred, labels = seq_texture)
-    tr_na = (np.sum(tr_con * neigh1))/np.sum(tr_con)
-    tr_ana = (np.sum(tr_con * neigh2))/np.sum(tr_con)
-    Y_test_pred = svm.predict(X_test2)
-    t_oa = accuracy_score(Y_test2, Y_test_pred)
-    t_aa = balanced_accuracy_score(Y_test2, Y_test_pred)
-    t_k = cohen_kappa_score(Y_test2, Y_test_pred)
-    t_con = confusion_matrix(Y_test2, Y_test_pred, labels = seq_texture)
-    t_na = (np.sum(t_con * neigh1))/np.sum(t_con)
-    t_ana = (np.sum(t_con * neigh2))/np.sum(t_con)
-    metrics = []
-    metrics = np.array([tr_oa, tr_aa, tr_k, tr_na, tr_ana, t_oa, t_aa, t_k, t_na, t_ana])
-    return metrics, tr_con, t_con
-
-#RF
-def c_rf(X_train2, Y_train2, X_test2, Y_test2):
-    tr_oa, t_oa, tr_aa, t_aa, tr_k, t_k, tr_na, t_na, tr_ana, t_ana = [[] for _ in range(10)]
-    #RF
-    rf.fit(X_train2, Y_train2)
-    Y_train_pred = rf.predict(X_train2)
-    tr_oa = accuracy_score(Y_train2, Y_train_pred)
-    tr_aa = balanced_accuracy_score(Y_train2, Y_train_pred)
-    tr_k = cohen_kappa_score(Y_train2, Y_train_pred)
-    tr_con = confusion_matrix(Y_train2, Y_train_pred, labels = seq_texture)
-    tr_na = (np.sum(tr_con * neigh1))/np.sum(tr_con)
-    tr_ana = (np.sum(tr_con * neigh2))/np.sum(tr_con)
-    Y_test_pred = rf.predict(X_test2)
-    t_oa = accuracy_score(Y_test2, Y_test_pred)
-    t_aa = balanced_accuracy_score(Y_test2, Y_test_pred)
-    t_k = cohen_kappa_score(Y_test2, Y_test_pred)
-    t_con = confusion_matrix(Y_test2, Y_test_pred, labels = seq_texture)
-    t_na = (np.sum(t_con * neigh1))/np.sum(t_con)
-    t_ana = (np.sum(t_con * neigh2))/np.sum(t_con)
-    metrics = []
-    metrics = np.array([tr_oa, tr_aa, tr_k, tr_na, tr_ana, t_oa, t_aa, t_k, t_na, t_ana])
-    return metrics, tr_con, t_con
-
 #PLS-DA
-def c_plsda(X_train2, Y_train2, X_test2, Y_test2):
+def c_plsda(X_train2, Y_train2, X_test2, Y_test2, n_comp, plot_components):
     tr_oa, t_oa, tr_aa, t_aa, tr_k, t_k, tr_na, t_na, tr_ana, t_ana = [[] for _ in range(10)]
     #PLS-DA
     #One-hot encoding for texture data
+    ce = []
+    n_comp_final = []
+    component = np.arange(1, n_comp)
     Y_train3 = pd.get_dummies(Y_train2)
+    for i in component:
+        pls_opt = PLSRegression(n_components=i, scale=False)
+        Y_train_pred = []
+        Y_train_act = []
+        Y_train_act_foo = []
+        #y0_p_cv = pls_opt.fit(X_train2, Y_train3)
+        #Predicting and using discriminant analysis i.e. argmax function for assigning the class
+        dict = {0:'Cl', 1:'ClLo', 2:'LoSa', 3:'SaCl', 4:'SaClLo', 5:'SaLo'}
+        for train_index, test_index in loo.split(X_train2):
+            # Separate data for training and testing in each iteration
+            X_train11, X_test11 = X_train2[train_index], X_train2[test_index]
+            Y_train11, Y_test11 = Y_train3.iloc[train_index], Y_train3.iloc[test_index]
+            pls_opt.fit(X_train11, Y_train11)
+            Y_train_pred_foo = pd.DataFrame(np.argmax(pls_opt.predict(X_test11), axis = 1))[0].map(dict)
+            Y_train_pred.append(Y_train_pred_foo[0])
+            Y_train_act_foo.append(np.argmax(Y_test11))
+            Y_train_act = [dict[key] for key in Y_train_act_foo]
+        tr_oa = accuracy_score(Y_train_pred, Y_train_act)
+        ce.append(tr_oa)
+        comp = 100*(i+1)/n_comp
+        stdout.write("\r%d%% completed" % comp)
+        stdout.flush()
+    stdout.write("\n")
+    #Calculate and print the position of minimum in MSE
+    cemax = np.argmax(ce)
+    n_comp_final = cemax+1
+    #print("Suggested number of components: ", n_comp_final)
+        if plot_components is True:
+            with plt.style.context(('ggplot')):
+                plt.plot(component, np.array(ce), '-v', color = 'blue', mfc='blue')
+                plt.plot(component[cemax], np.array(ce)[cemax], 'P', ms=10, mfc='red')
+                plt.xlabel('Number of PLS components')
+                plt.ylabel('CE')
+                plt.title('PLS')
+                plt.xlim(left=-1)
+            plt.show()
     #Define PLS object with optimal number of components
-    pls_opt = PLSRegression(n_components=20, scale=False)
+    pls_opt = PLSRegression(n_components=n_comp_final, scale=False)
     pls_opt.fit(X_train2, Y_train3)
     #Predicting and using discriminant analysis i.e. argmax function for assigning the class
     dict = {0:'Cl', 1:'ClLo', 2:'LoSa', 3:'SaCl', 4:'SaClLo', 5:'SaLo'}
@@ -281,8 +302,7 @@ def c_plsda(X_train2, Y_train2, X_test2, Y_test2):
     return metrics, tr_con, t_con
 
 
-#4
-#Empty variables
+#4 #Initializing Empty variables
 metrics_clay_final = np.empty([13,100])
 Y_iter_clay = []
 Y_p_iter_clay = []
@@ -295,18 +315,6 @@ Y_p_iter_sand = []
 train_nos = []
 test_nos = []
 
-metrics_classification_lr = np.empty([10,100])
-tr_con_final_lr = []
-t_con_final_lr = []
-metrics_classification_lda = np.empty([10,100])
-tr_con_final_lda = []
-t_con_final_lda = []
-metrics_classification_svm = np.empty([10,100])
-tr_con_final_svm = []
-t_con_final_svm = []
-metrics_classification_rf = np.empty([10,100])
-tr_con_final_rf = []
-t_con_final_rf = []
 metrics_classification_plsda = np.empty([10,100])
 tr_con_final_plsda = []
 t_con_final_plsda = []
@@ -340,8 +348,7 @@ neigh2 = np.array([[1, 1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0],
 [0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1]])
 
 
-#5
-#Iterations
+#5 #Iterations of Main code
 X = -np.log10(df.drop(['Sample_Code', 'Sand', 'Clay', 'Silt', 'Texture'], axis = 1))
 Y = pd.DataFrame(df, columns= ['Clay', 'Silt', 'Sand', 'Texture'])
 
@@ -395,31 +402,11 @@ for i in range(100):
     a = 3
     Y_train2 = Y_train1.iloc[:,a]
     Y_test2 = Y_test.iloc[:,a]
-    #LR
-    metrics, tr_con, t_con = c_lr(X_train2, Y_train2, X_test2, Y_test2)
-    metrics_classification_lr[:,i] = metrics
-    tr_con_final_lr.append(tr_con)
-    t_con_final_lr.append(t_con)    
-    #LDA
-    metrics, tr_con, t_con = c_lda(X_train2, Y_train2, X_test2, Y_test2)
-    metrics_classification_lda[:,i] = metrics
-    t_con_final_lda.append(t_con)    
-    tr_con_final_lda.append(tr_con)    
-    #SVM
-    metrics, tr_con, t_con = c_svm(X_train2, Y_train2, X_test2, Y_test2)
-    tr_con_final_svm.append(tr_con)    
-    t_con_final_svm.append(t_con)    
-    metrics_classification_svm[:,i] = metrics
-    #RF
-    metrics, tr_con, t_con = c_rf(X_train2, Y_train2, X_test2, Y_test2)
-    tr_con_final_rf.append(tr_con)    
-    t_con_final_rf.append(t_con)    
-    metrics_classification_rf[:,i] = metrics
     #PLSDA
-    #metrics, tr_con, t_con = c_plsda(X_train2, Y_train2, X_test2, Y_test2)
-    #tr_con_final_plsda.append(tr_con)    
-    #t_con_final_plsda.append(t_con)    
-    #metrics_classification_plsda[:,i] = metrics
+    metrics, tr_con, t_con = c_plsda(X_train2, Y_train2, X_test2, Y_test2)
+    tr_con_final_plsda.append(tr_con)    
+    t_con_final_plsda.append(t_con)    
+    metrics_classification_plsda[:,i] = metrics
     print(i)
 end_time = time.time()
 #total time taken
@@ -456,46 +443,23 @@ metrics_silt_final = pd.DataFrame(metrics_silt_final)
 metrics_sand_final = pd.DataFrame(metrics_sand_final)
 
 #Classification Outputs
-np.mean(metrics_classification_lr, axis=1)
-np.mean(metrics_classification_lda, axis=1)
-np.mean(metrics_classification_svm, axis=1)
-np.mean(metrics_classification_rf, axis=1)
-#np.mean(metrics_classification_plsda, axis=1)
-
-pd.DataFrame(metrics_classification_lr).to_csv('metrics_classification_lr.csv', index = False)
-pd.DataFrame(metrics_classification_lda).to_csv('metrics_classification_lda.csv', index = False)
-pd.DataFrame(metrics_classification_svm).to_csv('metrics_classification_svm.csv', index = False)
-pd.DataFrame(metrics_classification_rf).to_csv('metrics_classification_rf.csv', index = False)
-#pd.DataFrame(metrics_classification_plsda).to_csv('metrics_classification_plsda.csv', index = False)
-
-np.save("metrics_classification_lr", metrics_classification_lr)
-np.save("tr_con_final_lr", tr_con_final_lr)
-np.save("t_con_final_lr", t_con_final_lr)
-np.save("metrics_classification_lda", metrics_classification_lda)
-np.save("tr_con_final_lda", tr_con_final_lda)
-np.save("t_con_final_lda", t_con_final_lda)
-np.save("metrics_classification_svm", metrics_classification_svm)
-np.save("tr_con_final_svm", tr_con_final_svm)
-np.save("t_con_final_svm", t_con_final_svm)
-np.save("metrics_classification_rf", metrics_classification_rf)
-np.save("tr_con_final_rf", tr_con_final_rf)
-np.save("t_con_final_rf", t_con_final_rf)
-#np.save("metrics_classification_plsda", metrics_classification_plsda)
-#np.save("tr_con_final_plsda", tr_con_final_plsda)
-#np.save("t_con_final_plsda", t_con_final_plsda)
-
+np.mean(metrics_classification_plsda, axis=1)
+pd.DataFrame(metrics_classification_plsda).to_csv('metrics_classification_plsda.csv', index = False)
+np.save("metrics_classification_plsda", metrics_classification_plsda)
+np.save("tr_con_final_plsda", tr_con_final_plsda)
+np.save("t_con_final_plsda", t_con_final_plsda)
 
 #Writing out the confusion matrix
 seq_texture = ['Sa', 'LoSa', 'SaLo', 'SaClLo', 'SaCl', 'Cl', 'ClLo', 'Lo', 'SiCl', 'SiClLo', 'SiLo', 'Si']
 seq = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-tr_con_list = [tr_con_final_lr, tr_con_final_lda, tr_con_final_svm, tr_con_final_rf]
-t_con_list = [t_con_final_lr, t_con_final_lda, t_con_final_svm, t_con_final_rf]
-classifier_seq = ['LR','LDA','SVM','RF']
+tr_con_list = [tr_con_final_plsda]
+t_con_list = [t_con_final_plsda]
+classifier_seq = ['PLS-DA']
 stdout_fileinfo = sys.stdout
 sys.stdout = open('Confusion_Matrices.txt','a')
 print('Sequence-Mean, Std deviation')
 ##Mean Confusion metrics
-for i in range(4):
+for i in range(1):
     print(classifier_seq[i])
     print('Training')
     print(seq_texture)
@@ -568,8 +532,6 @@ np.save("Y_p_iter_clay_clip",Y_p_iter_clay_clip)
 np.save("Y_p_iter_sand_clip",Y_p_iter_sand_clip)
 np.save("Y_p_iter_silt_clip",Y_p_iter_silt_clip)
 
-
-
 #Clipped all the files to range of 0 to 100
 foo3 = []
 foo = list(np.load('Y_p_iter_silt.npy', allow_pickle = True))
@@ -604,6 +566,7 @@ train_nos = np.load("train_nos.npy")
 test_nos = np.load("test_nos.npy")
 Y_iter_silt = list(np.load("Y_iter_silt.npy",allow_pickle=True))
 ####Check_End###
+
 
 #8
 ##M2##
@@ -790,6 +753,7 @@ df_tex_abs.to_csv('Mean_absorbance_texture.csv')
 pca = PCA(n_components=3)
 X = -np.log10(df.drop(['Sample_Code', 'Sand', 'Clay', 'Silt', 'Texture'], axis = 1))
 S1 = pca.fit_transform(X)
+explained_variance_ratio = pca.explained_variance_ratio_
 df1 = pd.concat([pd.DataFrame(S1),Y['Texture']], axis=1)
 df1.to_csv('PC_absorbance.csv')
 X = df.drop(['Sample_Code', 'Sand', 'Clay', 'Silt', 'Texture'], axis = 1)
@@ -797,5 +761,363 @@ S2 = pca.fit_transform(X)
 df2 = pd.concat([pd.DataFrame(S2),Y['Texture']], axis=1)
 df2.to_csv('PC_reflectance.csv')
 
+#Histogram of soil fractions 
+foo = pd.DataFrame(df, columns= ['Clay', 'Silt', 'Sand'])
+# Iterate through the five airlines
+for i,name in enumerate(['Clay', 'Silt', 'Sand']):
+    # Subset to the airline
+    subset = foo.iloc[:, i]
+    # Draw the density plot
+    sns.distplot(subset, hist = False, kde = True, bins = 50,
+                 kde_kws = {'shade': True, 'linewidth': 3}, norm_hist=True,
+                 label = name)
+# Plot formatting
+plt.xlim(0,100)
+plt.xlabel('Percentage fraction')
+plt.ylabel('Density')
 
 
+
+#11
+####Other classification Functions####
+#LR
+def c_lr(X_train2, Y_train2, X_test2, Y_test2):
+    tr_oa, t_oa, tr_aa, t_aa, tr_k, t_k, tr_na, t_na, tr_ana, t_ana = [[] for _ in range(10)]
+    #LR
+    logreg.fit(X_train2, Y_train2)
+    Y_train_pred = logreg.predict(X_train2)
+    tr_oa = accuracy_score(Y_train2, Y_train_pred)
+    tr_aa = balanced_accuracy_score(Y_train2, Y_train_pred)
+    tr_k = cohen_kappa_score(Y_train2, Y_train_pred)
+    tr_con = confusion_matrix(Y_train2, Y_train_pred, labels = seq_texture)
+    tr_na = (np.sum(tr_con * neigh1))/np.sum(tr_con)
+    tr_ana = (np.sum(tr_con * neigh2))/np.sum(tr_con)
+    Y_test_pred = logreg.predict(X_test2)
+    t_oa = accuracy_score(Y_test2, Y_test_pred)
+    t_aa = balanced_accuracy_score(Y_test2, Y_test_pred)
+    t_k = cohen_kappa_score(Y_test2, Y_test_pred)
+    t_con = confusion_matrix(Y_test2, Y_test_pred, labels = seq_texture)
+    t_na = (np.sum(t_con * neigh1))/np.sum(t_con)
+    t_ana = (np.sum(t_con * neigh2))/np.sum(t_con)
+    metrics = []
+    metrics = np.array([tr_oa, tr_aa, tr_k, tr_na, tr_ana, t_oa, t_aa, t_k, t_na, t_ana])
+    return metrics, tr_con, t_con
+
+#LDA
+def c_lda(X_train2, Y_train2, X_test2, Y_test2):
+    tr_oa, t_oa, tr_aa, t_aa, tr_k, t_k, tr_na, t_na, tr_ana, t_ana = [[] for _ in range(10)]
+    #LDA
+    lda.fit(X_train2, Y_train2)
+    Y_train_pred = lda.predict(X_train2)
+    tr_oa = accuracy_score(Y_train2, Y_train_pred)
+    tr_aa = balanced_accuracy_score(Y_train2, Y_train_pred)
+    tr_k = cohen_kappa_score(Y_train2, Y_train_pred)
+    tr_con = confusion_matrix(Y_train2, Y_train_pred, labels = seq_texture)
+    tr_na = (np.sum(tr_con * neigh1))/np.sum(tr_con)
+    tr_ana = (np.sum(tr_con * neigh2))/np.sum(tr_con)
+    Y_test_pred = lda.predict(X_test2)
+    t_oa = accuracy_score(Y_test2, Y_test_pred)
+    t_aa = balanced_accuracy_score(Y_test2, Y_test_pred)
+    t_k = cohen_kappa_score(Y_test2, Y_test_pred)
+    t_con = confusion_matrix(Y_test2, Y_test_pred, labels = seq_texture)
+    t_na = (np.sum(t_con * neigh1))/np.sum(t_con)
+    t_ana = (np.sum(t_con * neigh2))/np.sum(t_con)
+    metrics = []
+    metrics = np.array([tr_oa, tr_aa, tr_k, tr_na, tr_ana, t_oa, t_aa, t_k, t_na, t_ana])
+    return metrics, tr_con, t_con
+
+##SVM
+def c_svm(X_train2, Y_train2, X_test2, Y_test2):
+    tr_oa, t_oa, tr_aa, t_aa, tr_k, t_k, tr_na, t_na, tr_ana, t_ana = [[] for _ in range(10)]
+    #SVM
+    svm.fit(X_train2, Y_train2)
+    Y_train_pred = svm.predict(X_train2)
+    tr_oa = accuracy_score(Y_train2, Y_train_pred)
+    tr_aa = balanced_accuracy_score(Y_train2, Y_train_pred)
+    tr_k = cohen_kappa_score(Y_train2, Y_train_pred)
+    tr_con = confusion_matrix(Y_train2, Y_train_pred, labels = seq_texture)
+    tr_na = (np.sum(tr_con * neigh1))/np.sum(tr_con)
+    tr_ana = (np.sum(tr_con * neigh2))/np.sum(tr_con)
+    Y_test_pred = svm.predict(X_test2)
+    t_oa = accuracy_score(Y_test2, Y_test_pred)
+    t_aa = balanced_accuracy_score(Y_test2, Y_test_pred)
+    t_k = cohen_kappa_score(Y_test2, Y_test_pred)
+    t_con = confusion_matrix(Y_test2, Y_test_pred, labels = seq_texture)
+    t_na = (np.sum(t_con * neigh1))/np.sum(t_con)
+    t_ana = (np.sum(t_con * neigh2))/np.sum(t_con)
+    metrics = []
+    metrics = np.array([tr_oa, tr_aa, tr_k, tr_na, tr_ana, t_oa, t_aa, t_k, t_na, t_ana])
+    return metrics, tr_con, t_con
+
+#RF
+def c_rf(X_train2, Y_train2, X_test2, Y_test2):
+    tr_oa, t_oa, tr_aa, t_aa, tr_k, t_k, tr_na, t_na, tr_ana, t_ana = [[] for _ in range(10)]
+    #RF
+    rf.fit(X_train2, Y_train2)
+    Y_train_pred = rf.predict(X_train2)
+    tr_oa = accuracy_score(Y_train2, Y_train_pred)
+    tr_aa = balanced_accuracy_score(Y_train2, Y_train_pred)
+    tr_k = cohen_kappa_score(Y_train2, Y_train_pred)
+    tr_con = confusion_matrix(Y_train2, Y_train_pred, labels = seq_texture)
+    tr_na = (np.sum(tr_con * neigh1))/np.sum(tr_con)
+    tr_ana = (np.sum(tr_con * neigh2))/np.sum(tr_con)
+    Y_test_pred = rf.predict(X_test2)
+    t_oa = accuracy_score(Y_test2, Y_test_pred)
+    t_aa = balanced_accuracy_score(Y_test2, Y_test_pred)
+    t_k = cohen_kappa_score(Y_test2, Y_test_pred)
+    t_con = confusion_matrix(Y_test2, Y_test_pred, labels = seq_texture)
+    t_na = (np.sum(t_con * neigh1))/np.sum(t_con)
+    t_ana = (np.sum(t_con * neigh2))/np.sum(t_con)
+    metrics = []
+    metrics = np.array([tr_oa, tr_aa, tr_k, tr_na, tr_ana, t_oa, t_aa, t_k, t_na, t_ana])
+    return metrics, tr_con, t_con
+
+metrics_classification_lr = np.empty([10,100])
+tr_con_final_lr = []
+t_con_final_lr = []
+metrics_classification_lda = np.empty([10,100])
+tr_con_final_lda = []
+t_con_final_lda = []
+metrics_classification_svm = np.empty([10,100])
+tr_con_final_svm = []
+t_con_final_svm = []
+metrics_classification_rf = np.empty([10,100])
+tr_con_final_rf = []
+t_con_final_rf = []
+
+#Classification Outputs
+np.mean(metrics_classification_lr, axis=1)
+np.mean(metrics_classification_lda, axis=1)
+np.mean(metrics_classification_svm, axis=1)
+np.mean(metrics_classification_rf, axis=1)
+
+pd.DataFrame(metrics_classification_lr).to_csv('metrics_classification_lr.csv', index = False)
+pd.DataFrame(metrics_classification_lda).to_csv('metrics_classification_lda.csv', index = False)
+pd.DataFrame(metrics_classification_svm).to_csv('metrics_classification_svm.csv', index = False)
+pd.DataFrame(metrics_classification_rf).to_csv('metrics_classification_rf.csv', index = False)
+
+np.save("metrics_classification_plsda", metrics_classification_plsda)
+np.save("tr_con_final_plsda", tr_con_final_plsda)
+np.save("t_con_final_plsda", t_con_final_plsda)
+
+
+#Writing out the confusion matrix
+seq_texture = ['Sa', 'LoSa', 'SaLo', 'SaClLo', 'SaCl', 'Cl', 'ClLo', 'Lo', 'SiCl', 'SiClLo', 'SiLo', 'Si']
+seq = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+tr_con_list = [tr_con_final_lr, tr_con_final_lda, tr_con_final_svm, tr_con_final_rf]
+t_con_list = [t_con_final_lr, t_con_final_lda, t_con_final_svm, t_con_final_rf]
+classifier_seq = ['LR','LDA','SVM','RF']
+stdout_fileinfo = sys.stdout
+sys.stdout = open('Confusion_Matrices.txt','a')
+print('Sequence-Mean, Std deviation')
+##Mean Confusion metrics
+for i in range(4):
+    print(classifier_seq[i])
+    print('Training')
+    print(seq_texture)
+    print(seq)
+    #Training
+    con_tr_mean = np.around(np.mean(tr_con_list[i], axis=0))
+    con_tr_std = np.around(np.std(tr_con_list[i], axis=0))
+    print(con_tr_mean)
+    print(con_tr_std)
+    #Testing
+    print('Testing')
+    con_t_mean = np.around(np.mean(t_con_list[i], axis=0))
+    con_t_std = np.around(np.std(t_con_list[i], axis=0))
+    print(con_t_mean)
+    print(con_t_std)
+sys.stdout.close()
+sys.stdout = stdout_fileinfo
+i
+
+p.mean(metrics_clay_final, axis=1)
+foo = np.mean(metrics_silt_final, axis=1)
+foo = np.mean(metrics_sand_final, axis=1)
+
+#Saving files to csv
+#Predictions
+list_iter = []
+for i in range(100):
+    name = 'iter_p_' + str(i+1)
+    list_iter.append(name)
+
+for i in range(100):
+    iter_i = pd.DataFrame([Y_p_iter_clay[i],Y_p_iter_silt[i],Y_p_iter_sand[i]]).T
+    iter_i[iter_i<0] = 0
+    iter_i[iter_i>100] = 100
+    iter_i.to_csv(list_iter[i], index = False)
+
+#Actual
+list_iter = []
+for i in range(100):
+    name = 'iter_' + str(i+1)
+    list_iter.append(name)
+
+for i in range(100):
+    iter_i = pd.DataFrame([Y_iter_clay[i],Y_iter_silt[i],Y_iter_sand[i]]).T
+    iter_i.to_csv(list_iter[i], index = False)
+
+
+#Other Classification functions with Regression values
+#LR
+def c_lr(X_train2, Y_train2, X_test2, Y_test2):
+    tr_oa, t_oa, tr_aa, t_aa, tr_k, t_k, tr_na, t_na, tr_ana, t_ana = [[] for _ in range(10)]
+    #LR
+    logreg.fit(X_train2, Y_train2)
+    Y_train_pred = logreg.predict(X_train2)
+    tr_oa = accuracy_score(Y_train2, Y_train_pred)
+    tr_aa = balanced_accuracy_score(Y_train2, Y_train_pred)
+    tr_k = cohen_kappa_score(Y_train2, Y_train_pred)
+    tr_con = confusion_matrix(Y_train2, Y_train_pred, labels = seq_texture)
+    tr_na = (np.sum(tr_con * neigh1))/np.sum(tr_con)
+    tr_ana = (np.sum(tr_con * neigh2))/np.sum(tr_con)
+    Y_test_pred = logreg.predict(X_test2)
+    t_oa = accuracy_score(Y_test2, Y_test_pred)
+    t_aa = balanced_accuracy_score(Y_test2, Y_test_pred)
+    t_k = cohen_kappa_score(Y_test2, Y_test_pred)
+    t_con = confusion_matrix(Y_test2, Y_test_pred, labels = seq_texture)
+    t_na = (np.sum(t_con * neigh1))/np.sum(t_con)
+    t_ana = (np.sum(t_con * neigh2))/np.sum(t_con)
+    metrics = []
+    metrics = np.array([tr_oa, tr_aa, tr_k, tr_na, tr_ana, t_oa, t_aa, t_k, t_na, t_ana])
+    #Regression
+    #dict_clay = {0:'Cl', 1:'ClLo', 2:'LoSa', 3:'SaCl', 4:'SaClLo', 5:'SaLo', 6:'Sa'}
+    dict_clay = {'Cl':58, 'ClLo':33.5, 'LoSa':6, 'SaCl':41.6, 'SaClLo':26, 'SaLo':12, 'Sa':3.3}
+    metrics_clay = regression_metrics(Y_train1.iloc[:,0],pd.DataFrame(Y_train_pred)[0].map(dict_clay),Y_test.iloc[:,0],pd.DataFrame(Y_test_pred)[0].map(dict_clay))    
+    dict_silt = {'Cl':20, 'ClLo':34, 'LoSa':12, 'SaCl':6.4, 'SaClLo':14, 'SaLo':22, 'Sa':5}
+    metrics_silt = regression_metrics(Y_train1.iloc[:,1],pd.DataFrame(Y_train_pred)[0].map(dict_silt),Y_test.iloc[:,1],pd.DataFrame(Y_test_pred)[0].map(dict_silt))    
+    dict_sand = {'Cl':22, 'ClLo':32.5, 'LoSa':82, 'SaCl':52, 'SaClLo':60, 'SaLo':66, 'Sa':91.7}
+    metrics_sand = regression_metrics(Y_train1.iloc[:,2],pd.DataFrame(Y_train_pred)[0].map(dict_sand),Y_test.iloc[:,2],pd.DataFrame(Y_test_pred)[0].map(dict_sand))    
+    return metrics, tr_con, t_con, metrics_clay, metrics_silt, metrics_sand
+
+#LDA
+def c_lda(X_train2, Y_train2, X_test2, Y_test2):
+    tr_oa, t_oa, tr_aa, t_aa, tr_k, t_k, tr_na, t_na, tr_ana, t_ana = [[] for _ in range(10)]
+    #LDA
+    lda.fit(X_train2, Y_train2)
+    Y_train_pred = lda.predict(X_train2)
+    tr_oa = accuracy_score(Y_train2, Y_train_pred)
+    tr_aa = balanced_accuracy_score(Y_train2, Y_train_pred)
+    tr_k = cohen_kappa_score(Y_train2, Y_train_pred)
+    tr_con = confusion_matrix(Y_train2, Y_train_pred, labels = seq_texture)
+    tr_na = (np.sum(tr_con * neigh1))/np.sum(tr_con)
+    tr_ana = (np.sum(tr_con * neigh2))/np.sum(tr_con)
+    Y_test_pred = lda.predict(X_test2)
+    t_oa = accuracy_score(Y_test2, Y_test_pred)
+    t_aa = balanced_accuracy_score(Y_test2, Y_test_pred)
+    t_k = cohen_kappa_score(Y_test2, Y_test_pred)
+    t_con = confusion_matrix(Y_test2, Y_test_pred, labels = seq_texture)
+    t_na = (np.sum(t_con * neigh1))/np.sum(t_con)
+    t_ana = (np.sum(t_con * neigh2))/np.sum(t_con)
+    metrics = []
+    metrics = np.array([tr_oa, tr_aa, tr_k, tr_na, tr_ana, t_oa, t_aa, t_k, t_na, t_ana])
+    #Regression
+    #dict_clay = {0:'Cl', 1:'ClLo', 2:'LoSa', 3:'SaCl', 4:'SaClLo', 5:'SaLo', 6:'Sa'}
+    dict_clay = {'Cl':58, 'ClLo':33.5, 'LoSa':6, 'SaCl':41.6, 'SaClLo':26, 'SaLo':12, 'Sa':3.3}
+    metrics_clay = regression_metrics(Y_train1.iloc[:,0],pd.DataFrame(Y_train_pred)[0].map(dict_clay),Y_test.iloc[:,0],pd.DataFrame(Y_test_pred)[0].map(dict_clay))    
+    dict_silt = {'Cl':20, 'ClLo':34, 'LoSa':12, 'SaCl':6.4, 'SaClLo':14, 'SaLo':22, 'Sa':5}
+    metrics_silt = regression_metrics(Y_train1.iloc[:,1],pd.DataFrame(Y_train_pred)[0].map(dict_silt),Y_test.iloc[:,1],pd.DataFrame(Y_test_pred)[0].map(dict_silt))    
+    dict_sand = {'Cl':22, 'ClLo':32.5, 'LoSa':82, 'SaCl':52, 'SaClLo':60, 'SaLo':66, 'Sa':91.7}
+    metrics_sand = regression_metrics(Y_train1.iloc[:,2],pd.DataFrame(Y_train_pred)[0].map(dict_sand),Y_test.iloc[:,2],pd.DataFrame(Y_test_pred)[0].map(dict_sand))    
+    return metrics, tr_con, t_con, metrics_clay, metrics_silt, metrics_sand
+
+##SVM
+def c_svm(X_train2, Y_train2, X_test2, Y_test2):
+    tr_oa, t_oa, tr_aa, t_aa, tr_k, t_k, tr_na, t_na, tr_ana, t_ana = [[] for _ in range(10)]
+    #SVM
+    svm.fit(X_train2, Y_train2)
+    Y_train_pred = svm.predict(X_train2)
+    tr_oa = accuracy_score(Y_train2, Y_train_pred)
+    tr_aa = balanced_accuracy_score(Y_train2, Y_train_pred)
+    tr_k = cohen_kappa_score(Y_train2, Y_train_pred)
+    tr_con = confusion_matrix(Y_train2, Y_train_pred, labels = seq_texture)
+    tr_na = (np.sum(tr_con * neigh1))/np.sum(tr_con)
+    tr_ana = (np.sum(tr_con * neigh2))/np.sum(tr_con)
+    Y_test_pred = svm.predict(X_test2)
+    t_oa = accuracy_score(Y_test2, Y_test_pred)
+    t_aa = balanced_accuracy_score(Y_test2, Y_test_pred)
+    t_k = cohen_kappa_score(Y_test2, Y_test_pred)
+    t_con = confusion_matrix(Y_test2, Y_test_pred, labels = seq_texture)
+    t_na = (np.sum(t_con * neigh1))/np.sum(t_con)
+    t_ana = (np.sum(t_con * neigh2))/np.sum(t_con)
+    metrics = []
+    metrics = np.array([tr_oa, tr_aa, tr_k, tr_na, tr_ana, t_oa, t_aa, t_k, t_na, t_ana])
+    #Regression
+    #dict_clay = {0:'Cl', 1:'ClLo', 2:'LoSa', 3:'SaCl', 4:'SaClLo', 5:'SaLo', 6:'Sa'}
+    dict_clay = {'Cl':58, 'ClLo':33.5, 'LoSa':6, 'SaCl':41.6, 'SaClLo':26, 'SaLo':12, 'Sa':3.3}
+    metrics_clay = regression_metrics(Y_train1.iloc[:,0],pd.DataFrame(Y_train_pred)[0].map(dict_clay),Y_test.iloc[:,0],pd.DataFrame(Y_test_pred)[0].map(dict_clay))    
+    dict_silt = {'Cl':20, 'ClLo':34, 'LoSa':12, 'SaCl':6.4, 'SaClLo':14, 'SaLo':22, 'Sa':5}
+    metrics_silt = regression_metrics(Y_train1.iloc[:,1],pd.DataFrame(Y_train_pred)[0].map(dict_silt),Y_test.iloc[:,1],pd.DataFrame(Y_test_pred)[0].map(dict_silt))    
+    dict_sand = {'Cl':22, 'ClLo':32.5, 'LoSa':82, 'SaCl':52, 'SaClLo':60, 'SaLo':66, 'Sa':91.7}
+    metrics_sand = regression_metrics(Y_train1.iloc[:,2],pd.DataFrame(Y_train_pred)[0].map(dict_sand),Y_test.iloc[:,2],pd.DataFrame(Y_test_pred)[0].map(dict_sand))    
+    return metrics, tr_con, t_con, metrics_clay, metrics_silt, metrics_sand
+
+#RF
+def c_rf(X_train2, Y_train2, X_test2, Y_test2):
+    tr_oa, t_oa, tr_aa, t_aa, tr_k, t_k, tr_na, t_na, tr_ana, t_ana = [[] for _ in range(10)]
+    #RF
+    rf.fit(X_train2, Y_train2)
+    Y_train_pred = rf.predict(X_train2)
+    tr_oa = accuracy_score(Y_train2, Y_train_pred)
+    tr_aa = balanced_accuracy_score(Y_train2, Y_train_pred)
+    tr_k = cohen_kappa_score(Y_train2, Y_train_pred)
+    tr_con = confusion_matrix(Y_train2, Y_train_pred, labels = seq_texture)
+    tr_na = (np.sum(tr_con * neigh1))/np.sum(tr_con)
+    tr_ana = (np.sum(tr_con * neigh2))/np.sum(tr_con)
+    Y_test_pred = rf.predict(X_test2)
+    t_oa = accuracy_score(Y_test2, Y_test_pred)
+    t_aa = balanced_accuracy_score(Y_test2, Y_test_pred)
+    t_k = cohen_kappa_score(Y_test2, Y_test_pred)
+    t_con = confusion_matrix(Y_test2, Y_test_pred, labels = seq_texture)
+    t_na = (np.sum(t_con * neigh1))/np.sum(t_con)
+    t_ana = (np.sum(t_con * neigh2))/np.sum(t_con)
+    metrics = []
+    metrics = np.array([tr_oa, tr_aa, tr_k, tr_na, tr_ana, t_oa, t_aa, t_k, t_na, t_ana])
+    #Regression
+    #dict_clay = {0:'Cl', 1:'ClLo', 2:'LoSa', 3:'SaCl', 4:'SaClLo', 5:'SaLo', 6:'Sa'}
+    dict_clay = {'Cl':58, 'ClLo':33.5, 'LoSa':6, 'SaCl':41.6, 'SaClLo':26, 'SaLo':12, 'Sa':3.3}
+    metrics_clay = regression_metrics(Y_train1.iloc[:,0],pd.DataFrame(Y_train_pred)[0].map(dict_clay),Y_test.iloc[:,0],pd.DataFrame(Y_test_pred)[0].map(dict_clay))    
+    dict_silt = {'Cl':20, 'ClLo':34, 'LoSa':12, 'SaCl':6.4, 'SaClLo':14, 'SaLo':22, 'Sa':5}
+    metrics_silt = regression_metrics(Y_train1.iloc[:,1],pd.DataFrame(Y_train_pred)[0].map(dict_silt),Y_test.iloc[:,1],pd.DataFrame(Y_test_pred)[0].map(dict_silt))    
+    dict_sand = {'Cl':22, 'ClLo':32.5, 'LoSa':82, 'SaCl':52, 'SaClLo':60, 'SaLo':66, 'Sa':91.7}
+    metrics_sand = regression_metrics(Y_train1.iloc[:,2],pd.DataFrame(Y_train_pred)[0].map(dict_sand),Y_test.iloc[:,2],pd.DataFrame(Y_test_pred)[0].map(dict_sand))    
+    return metrics, tr_con, t_con, metrics_clay, metrics_silt, metrics_sand
+
+#PLS-DA
+def c_plsda(X_train2, Y_train2, X_test2, Y_test2):
+    tr_oa, t_oa, tr_aa, t_aa, tr_k, t_k, tr_na, t_na, tr_ana, t_ana = [[] for _ in range(10)]
+    #PLS-DA
+    #One-hot encoding for texture data
+    Y_train3 = pd.get_dummies(Y_train2)
+    #Define PLS object with optimal number of components
+    n_comp_opt = optimise_pls_cv2(X_train2, Y_train3, n_comp=30)
+    pls_opt = PLSRegression(n_components=n_comp_opt, scale=False)
+    pls_opt.fit(X_train2, Y_train3)
+    #Predicting and using discriminant analysis i.e. argmax function for assigning the class
+    dict = {0:'Cl', 1:'ClLo', 2:'LoSa', 3:'SaCl', 4:'SaClLo', 5:'SaLo'}
+    Y_train_pred = pd.DataFrame(np.argmax(pls_opt.predict(X_train2), axis = 1))[0].map(dict)
+    tr_oa = accuracy_score(Y_train2, Y_train_pred)
+    tr_aa = balanced_accuracy_score(Y_train2, Y_train_pred)
+    tr_k = cohen_kappa_score(Y_train2, Y_train_pred)
+    tr_con = confusion_matrix(Y_train2, Y_train_pred, labels = seq_texture)
+    tr_na = (np.sum(tr_con * neigh1))/np.sum(tr_con)
+    tr_ana = (np.sum(tr_con * neigh2))/np.sum(tr_con)
+    Y_test_pred = pd.DataFrame(np.argmax(pls_opt.predict(X_test2), axis = 1))[0].map(dict)
+    t_oa = accuracy_score(Y_test2, Y_test_pred)
+    t_aa = balanced_accuracy_score(Y_test2, Y_test_pred)
+    t_k = cohen_kappa_score(Y_test2, Y_test_pred)
+    t_con = confusion_matrix(Y_test2, Y_test_pred, labels = seq_texture)
+    t_na = (np.sum(t_con * neigh1))/np.sum(t_con)
+    t_ana = (np.sum(t_con * neigh2))/np.sum(t_con)
+    metrics = []
+    metrics = np.array([tr_oa, tr_aa, tr_k, tr_na, tr_ana, t_oa, t_aa, t_k, t_na, t_ana])
+    #Regression
+    #dict_clay = {0:'Cl', 1:'ClLo', 2:'LoSa', 3:'SaCl', 4:'SaClLo', 5:'SaLo', 6:'Sa'}
+    dict_clay = {'Cl':58, 'ClLo':33.5, 'LoSa':6, 'SaCl':41.6, 'SaClLo':26, 'SaLo':12, 'Sa':3.3}
+    metrics_clay = regression_metrics(Y_train1.iloc[:,0],pd.DataFrame(Y_train_pred)[0].map(dict_clay),Y_test.iloc[:,0],pd.DataFrame(Y_test_pred)[0].map(dict_clay))    
+    dict_silt = {'Cl':20, 'ClLo':34, 'LoSa':12, 'SaCl':6.4, 'SaClLo':14, 'SaLo':22, 'Sa':5}
+    metrics_silt = regression_metrics(Y_train1.iloc[:,1],pd.DataFrame(Y_train_pred)[0].map(dict_silt),Y_test.iloc[:,1],pd.DataFrame(Y_test_pred)[0].map(dict_silt))    
+    dict_sand = {'Cl':22, 'ClLo':32.5, 'LoSa':82, 'SaCl':52, 'SaClLo':60, 'SaLo':66, 'Sa':91.7}
+    metrics_sand = regression_metrics(Y_train1.iloc[:,2],pd.DataFrame(Y_train_pred)[0].map(dict_sand),Y_test.iloc[:,2],pd.DataFrame(Y_test_pred)[0].map(dict_sand))    
+    return metrics, tr_con, t_con, metrics_clay, metrics_silt, metrics_sand
