@@ -43,10 +43,12 @@ svm = SVC()
 from sklearn.ensemble import RandomForestClassifier
 rf = RandomForestClassifier()
 from sklearn.model_selection import LeaveOneOut
+loo = LeaveOneOut()
 
 #2 #Data Import
 #Set path
-path = 'D:/Academics/PhD/SEM 9/Paper_2_Soil_texture_quantitative/Draft2/Codes'
+#path = 'D:/Academics/PhD/SEM 9/Paper_2_Soil_texture_quantitative/Working_Files/Codes_final'
+path = 'C:/Users/DNK/Downloads/Foo/Draft_2'
 os.chdir(path)
 file = 'Working_lab.csv'
 #Data Import
@@ -58,6 +60,18 @@ df = df.drop(df.iloc[:, 5:55], axis = 1)
 
 
 #3 #Definition of various functions
+#VIP scores calculation (adapted from https://github.com/scikit-learn/scikit-learn/issues/7050)
+def vip_efficient(model):
+    t = model.x_scores_
+    w = model.x_weights_ # replace with x_rotations_ if needed
+    q = model.y_loadings_ 
+    features_, _ = w.shape
+    vip = np.zeros(shape=(features_,))
+    inner_sum = np.diag(t.T @ t @ q.T @ q)
+    SS_total = np.sum(inner_sum)
+    vip = np.sqrt(features_*(w**2 @ inner_sum)/ SS_total)
+    return vip
+
 #PLS function
 def optimise_pls_cv(X0, y0, X1, y1, n_comp, plot_components):
     mse = []
@@ -101,6 +115,8 @@ def optimise_pls_cv(X0, y0, X1, y1, n_comp, plot_components):
     #Calculate scores for calibration and cross-validation
     score0_p = r2_score(y0, y0_p)
     score0_p_cv = r2_score(y0, y0_p_cv)
+    #VIP score calculation
+    vip_scores = vip_efficient(pls_opt)
     #Plot regression and figures of merit
     rangey = max(y0) - min(y0)
     rangex = max(y0_p) - min(y0_p)
@@ -151,7 +167,7 @@ def optimise_pls_cv(X0, y0, X1, y1, n_comp, plot_components):
     rpiq_v = iqr_v/rmse_v
     bias_v = np.mean(y1_p) - np.mean(y1)
     metrics_final = np.array([n_comp_final, r2_cv, rmse_cv, r2_c, rmse_c, rpd_c, rpiq_c, bias_c, r2_v, rmse_v, rpd_v, rpiq_v, bias_v])
-    return metrics_final, y0_p, y1_p
+    return vip_scores, metrics_final, y0_p, y1_p
 
 def optimise_pls_cv1(X0, y0, X1, y1, n_comp):
     mse = []
@@ -178,11 +194,13 @@ def optimise_pls_cv1(X0, y0, X1, y1, n_comp):
     y0_p = pls_opt.predict(X0)
     #Formatting for easy calculations
     y0_p = pd.Series(y0_p[:,0], index=y0.index)
+    #VIP score calculation
+    vip_scores = vip_efficient(pls_opt)
     #Fit to the entire validation dataset
     y1_p = pls_opt.predict(X1)
     #Formatting for easy calculations
     y1_p = pd.Series(y1_p[:,0], index=y1.index)
-    return y0_p, y1_p
+    return vip_scores, y0_p, y1_p
 
 def log_ratio_pred(y_c_si_cl, y_c_sa_cl):
     y_silt_pred = 100 * np.exp(y_c_si_cl)/(np.exp(y_c_si_cl) + np.exp(y_c_sa_cl) +1)
@@ -268,19 +286,21 @@ def c_plsda(X_train2, Y_train2, X_test2, Y_test2, n_comp, plot_components):
     #Calculate and print the position of minimum in MSE
     cemax = np.argmax(ce)
     n_comp_final = cemax+1
-    #print("Suggested number of components: ", n_comp_final)
-        if plot_components is True:
-            with plt.style.context(('ggplot')):
-                plt.plot(component, np.array(ce), '-v', color = 'blue', mfc='blue')
-                plt.plot(component[cemax], np.array(ce)[cemax], 'P', ms=10, mfc='red')
-                plt.xlabel('Number of PLS components')
-                plt.ylabel('CE')
-                plt.title('PLS')
-                plt.xlim(left=-1)
-            plt.show()
+    print("Suggested number of components: ", n_comp_final)
+    if plot_components is True:
+        with plt.style.context(('ggplot')):
+            plt.plot(component, np.array(ce), '-v', color = 'blue', mfc='blue')
+            plt.plot(component[cemax], np.array(ce)[cemax], 'P', ms=10, mfc='red')
+            plt.xlabel('Number of PLS components')
+            plt.ylabel('CE')
+            plt.title('PLS')
+            plt.xlim(left=-1)
+        plt.show()
     #Define PLS object with optimal number of components
     pls_opt = PLSRegression(n_components=n_comp_final, scale=False)
     pls_opt.fit(X_train2, Y_train3)
+    #VIP score calculation
+    vip_scores = vip_efficient(pls_opt)
     #Predicting and using discriminant analysis i.e. argmax function for assigning the class
     dict = {0:'Cl', 1:'ClLo', 2:'LoSa', 3:'SaCl', 4:'SaClLo', 5:'SaLo'}
     Y_train_pred = pd.DataFrame(np.argmax(pls_opt.predict(X_train2), axis = 1))[0].map(dict)
@@ -299,22 +319,37 @@ def c_plsda(X_train2, Y_train2, X_test2, Y_test2, n_comp, plot_components):
     t_ana = (np.sum(t_con * neigh2))/np.sum(t_con)
     metrics = []
     metrics = np.array([tr_oa, tr_aa, tr_k, tr_na, tr_ana, t_oa, t_aa, t_k, t_na, t_ana])
-    return metrics, tr_con, t_con
+    return vip_scores, metrics, tr_con, t_con
 
 
 #4 #Initializing Empty variables
+vip_clay_final = np.empty([2050,100])
 metrics_clay_final = np.empty([13,100])
 Y_iter_clay = []
 Y_p_iter_clay = []
+vip_silt_final = np.empty([2050,100])
 metrics_silt_final = np.empty([13,100])
 Y_iter_silt = []
 Y_p_iter_silt = []
+vip_sand_final = np.empty([2050,100])
 metrics_sand_final = np.empty([13,100])
 Y_iter_sand = []
 Y_p_iter_sand = []
 train_nos = []
 test_nos = []
+vip_fraction_1_final = np.empty([2050,100])
+vip_fraction_2_final = np.empty([2050,100])
+metrics_clay_final_log_ratio = np.empty([10,100])
+Y_iter_clay_log_ratio = []
+Y_p_iter_clay_log_ratio = []
+metrics_silt_final_log_ratio = np.empty([10,100])
+Y_iter_silt_log_ratio = []
+Y_p_iter_silt_log_ratio = []
+metrics_sand_final_log_ratio = np.empty([10,100])
+Y_iter_sand_log_ratio = []
+Y_p_iter_sand_log_ratio = []
 
+vip_plsda_final = np.empty([2050,100])
 metrics_classification_plsda = np.empty([10,100])
 tr_con_final_plsda = []
 t_con_final_plsda = []
@@ -351,6 +386,9 @@ neigh2 = np.array([[1, 1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0],
 #5 #Iterations of Main code
 X = -np.log10(df.drop(['Sample_Code', 'Sand', 'Clay', 'Silt', 'Texture'], axis = 1))
 Y = pd.DataFrame(df, columns= ['Clay', 'Silt', 'Sand', 'Texture'])
+#Log-ratio trick
+Y['si_cl'] = np.log(Y['Silt']/Y['Clay'])
+Y['sa_cl'] = np.log(Y['Sand']/Y['Clay'])
 
 start_time = time.time()
 for i in range(100):
@@ -376,7 +414,8 @@ for i in range(100):
     a = 0
     Y_train2 = Y_train1.iloc[:,a]
     Y_test2 = Y_test.iloc[:,a]
-    metrics_clay, y_c_clay, y_v_clay = optimise_pls_cv(X0=X_train2, y0 = Y_train2, X1 = X_test2, y1 = Y_test2, n_comp = 40, plot_components=False)
+    vip_clay, metrics_clay, y_c_clay, y_v_clay = optimise_pls_cv(X0=X_train2, y0 = Y_train2, X1 = X_test2, y1 = Y_test2, n_comp = 40, plot_components=False)
+    vip_clay_final[:,i] = vip_clay
     metrics_clay_final[:,i] = metrics_clay
     Y_iter_clay.append(pd.concat([Y_train2,Y_test2]))
     Y_p_iter_clay.append(pd.concat([y_c_clay,y_v_clay]))
@@ -384,7 +423,8 @@ for i in range(100):
     a = 1
     Y_train2 = Y_train1.iloc[:,a]
     Y_test2 = Y_test.iloc[:,a]
-    metrics_silt, y_c_silt, y_v_silt = optimise_pls_cv(X0=X_train2, y0 = Y_train2, X1 = X_test2, y1 = Y_test2, n_comp = 40, plot_components=False)
+    vip_silt, metrics_silt, y_c_silt, y_v_silt = optimise_pls_cv(X0=X_train2, y0 = Y_train2, X1 = X_test2, y1 = Y_test2, n_comp = 40, plot_components=False)
+    vip_silt_final[:,i] = vip_silt
     metrics_silt_final[:,i] = metrics_silt
     Y_iter_silt.append(pd.concat([Y_train2,Y_test2]))
     Y_p_iter_silt.append(pd.concat([y_c_silt,y_v_silt]))
@@ -392,21 +432,48 @@ for i in range(100):
     a = 2
     Y_train2 = Y_train1.iloc[:,a]
     Y_test2 = Y_test.iloc[:,a]
-    metrics_sand, y_c_sand, y_v_sand = optimise_pls_cv(X0=X_train2, y0 = Y_train2, X1 = X_test2, y1 = Y_test2, n_comp = 40, plot_components=False)
+    vip_sand, metrics_sand, y_c_sand, y_v_sand = optimise_pls_cv(X0=X_train2, y0 = Y_train2, X1 = X_test2, y1 = Y_test2, n_comp = 40, plot_components=False)
+    vip_sand_final[:,i] = vip_sand
     metrics_sand_final[:,i] = metrics_sand
     Y_iter_sand.append(pd.concat([Y_train2,Y_test2]))
     Y_p_iter_sand.append(pd.concat([y_c_sand,y_v_sand]))
     train_nos.append(Y_train2.size)
     test_nos.append(Y_test2.size)
+    ##Log-ratio trick
+    a = 4
+    Y_train2 = Y_train1.iloc[:,a]
+    Y_test2 = Y_test.iloc[:,a]
+    vip_fraction_1, y_c_si_cl, y_v_si_cl = optimise_pls_cv1(X0=X_train2, y0 = Y_train2, X1 = X_test2, y1 = Y_test2, n_comp = 30)
+    vip_fraction_1_final[:,i] = vip_fraction_1
+    a = 5
+    Y_train2 = Y_train1.iloc[:,a]
+    Y_test2 = Y_test.iloc[:,a]
+    vip_fraction_2, y_c_sa_cl, y_v_sa_cl = optimise_pls_cv1(X0=X_train2, y0 = Y_train2, X1 = X_test2, y1 = Y_test2, n_comp = 30)
+    vip_fraction_2_final[:,i] = vip_fraction_2
+    y_c_clay, y_c_silt, y_c_sand = log_ratio_pred(y_c_si_cl, y_c_sa_cl)
+    y_v_clay, y_v_silt, y_v_sand = log_ratio_pred(y_v_si_cl, y_v_sa_cl)
+    metrics_clay = regression_metrics(Y_train1.iloc[:,0], y_c_clay, Y_test.iloc[:,0], y_v_clay)
+    metrics_clay_final_log_ratio[:,i] = metrics_clay
+    metrics_silt = regression_metrics(Y_train1.iloc[:,1], y_c_silt, Y_test.iloc[:,1], y_v_silt)
+    metrics_silt_final_log_ratio[:,i] = metrics_silt
+    metrics_sand = regression_metrics(Y_train1.iloc[:,2], y_c_sand, Y_test.iloc[:,2], y_v_sand)
+    metrics_sand_final_log_ratio[:,i] = metrics_sand
+    Y_iter_clay_log_ratio.append(pd.concat([Y_train1.iloc[:,0],Y_test.iloc[:,0]]))
+    Y_p_iter_clay_log_ratio.append(pd.concat([y_c_clay,y_v_clay]))
+    Y_iter_silt_log_ratio.append(pd.concat([Y_train1.iloc[:,1],Y_test.iloc[:,1]]))
+    Y_p_iter_silt_log_ratio.append(pd.concat([y_c_silt,y_v_silt]))
+    Y_iter_sand_log_ratio.append(pd.concat([Y_train1.iloc[:,2],Y_test.iloc[:,2]]))
+    Y_p_iter_sand_log_ratio.append(pd.concat([y_c_sand,y_v_sand]))    
     #Classification
     a = 3
     Y_train2 = Y_train1.iloc[:,a]
     Y_test2 = Y_test.iloc[:,a]
     #PLSDA
-    metrics, tr_con, t_con = c_plsda(X_train2, Y_train2, X_test2, Y_test2)
+    vip_plsda, metrics, tr_con, t_con = c_plsda(X_train2, Y_train2, X_test2, Y_test2, n_comp = 40, plot_components=False)
+    vip_plsda_final[:,i] = vip_plsda
+    metrics_classification_plsda[:,i] = metrics
     tr_con_final_plsda.append(tr_con)    
     t_con_final_plsda.append(t_con)    
-    metrics_classification_plsda[:,i] = metrics
     print(i)
 end_time = time.time()
 #total time taken
@@ -422,18 +489,54 @@ print("Time required was {} minutes".format(req_time))
 np.save("metrics_clay_final",metrics_clay_final)
 np.save("metrics_silt_final",metrics_silt_final)
 np.save("metrics_sand_final",metrics_sand_final)
-np.save("Y_iter_clay",Y_iter_clay)
-np.save("Y_iter_silt",Y_iter_silt)
-np.save("Y_iter_sand",Y_iter_sand)
-np.save("Y_p_iter_clay",Y_p_iter_clay)
-np.save("Y_p_iter_silt",Y_p_iter_silt)
-np.save("Y_p_iter_sand",Y_p_iter_sand)
+
+array_dict = {f'array_{idx}': arr for idx, arr in enumerate(Y_iter_clay)}
+np.savez_compressed('Y_iter_clay.npz', **array_dict)
+array_dict = {f'array_{idx}': arr for idx, arr in enumerate(Y_iter_silt)}
+np.savez_compressed('Y_iter_silt.npz', **array_dict)
+array_dict = {f'array_{idx}': arr for idx, arr in enumerate(Y_iter_sand)}
+np.savez_compressed('Y_iter_sand.npz', **array_dict)
+array_dict = {f'array_{idx}': arr for idx, arr in enumerate(Y_p_iter_clay)}
+np.savez_compressed('Y_p_iter_clay.npz', **array_dict)
+array_dict = {f'array_{idx}': arr for idx, arr in enumerate(Y_p_iter_silt)}
+np.savez_compressed('Y_p_iter_silt.npz', **array_dict)
+array_dict = {f'array_{idx}': arr for idx, arr in enumerate(Y_p_iter_sand)}
+np.savez_compressed('Y_p_iter_sand.npz', **array_dict)
 np.save("train_nos",train_nos)
 np.save("test_nos",test_nos)
+np.save("metrics_clay_final_log_ratio",metrics_clay_final_log_ratio)
+np.save("metrics_silt_final_log_ratio",metrics_silt_final_log_ratio)
+np.save("metrics_sand_final_log_ratio",metrics_sand_final_log_ratio)
+np.save("Y_p_iter_log_ratio_clay",Y_p_iter_clay_log_ratio)
+np.save("Y_p_iter_log_ratio_silt",Y_p_iter_silt_log_ratio)
+np.save("Y_p_iter_log_ratio_sand",Y_p_iter_sand_log_ratio)
+array_dict = {f'array_{idx}': arr for idx, arr in enumerate(Y_p_iter_clay_log_ratio)}
+np.savez_compressed('Y_p_iter_clay_log_ratio.npz', **array_dict)
+array_dict = {f'array_{idx}': arr for idx, arr in enumerate(Y_p_iter_silt_log_ratio)}
+np.savez_compressed('Y_p_iter_silt_log_ratio.npz', **array_dict)
+array_dict = {f'array_{idx}': arr for idx, arr in enumerate(Y_p_iter_sand_log_ratio)}
+np.savez_compressed('Y_p_iter_sand_log_ratio.npz', **array_dict)
+np.save("vip_clay_final",vip_clay_final)
+np.save("vip_silt_final",vip_silt_final)
+np.save("vip_sand_final",vip_sand_final)
+np.save("vip_fraction_1_final",vip_fraction_1_final)
+np.save("vip_fraction_2_final",vip_fraction_2_final)
+np.save("vip_plsda_final",vip_plsda_final)
+del array_dict
+
 
 pd.DataFrame(metrics_clay_final).to_csv('metrics_clay_final.csv', index = False)
 pd.DataFrame(metrics_silt_final).to_csv('metrics_silt_final.csv', index = False)
 pd.DataFrame(metrics_sand_final).to_csv('metrics_sand_final.csv', index = False)
+pd.DataFrame(metrics_clay_final_log_ratio).to_csv('metrics_clay_final_log_ratio.csv', index = False)
+pd.DataFrame(metrics_silt_final_log_ratio).to_csv('metrics_silt_final_log_ratio.csv', index = False)
+pd.DataFrame(metrics_sand_final_log_ratio).to_csv('metrics_sand_final_log_ratio.csv', index = False)
+pd.DataFrame(vip_clay_final).to_csv('vip_clay_final.csv', index = False)
+pd.DataFrame(vip_silt_final).to_csv('vip_silt_final.csv', index = False)
+pd.DataFrame(vip_sand_final).to_csv('vip_sand_final.csv', index = False)
+pd.DataFrame(vip_fraction_1_final).to_csv('vip_fraction_1_final.csv', index = False)
+pd.DataFrame(vip_fraction_2_final).to_csv('vip_fraction_2_final.csv', index = False)
+pd.DataFrame(vip_plsda_final).to_csv('vip_plsda_final.csv', index = False)
 
 metrics_clay_final = np.load('metrics_clay_final.npy', allow_pickle = True)
 metrics_silt_final = np.load('metrics_silt_final.npy', allow_pickle = True)
@@ -460,7 +563,7 @@ sys.stdout = open('Confusion_Matrices.txt','a')
 print('Sequence-Mean, Std deviation')
 ##Mean Confusion metrics
 for i in range(1):
-    print(classifier_seq[i])
+    print(classifier_seq[0])
     print('Training')
     print(seq_texture)
     print(seq)
@@ -496,6 +599,18 @@ for i in range(100):
     iter_i[iter_i>100] = 100
     iter_i.to_csv(list_iter[i], index = False)
 
+#Predictions log ratio
+list_iter = []
+for i in range(100):
+    name = 'iter_p_log_ratio_' + str(i+1)
+    list_iter.append(name)
+
+for i in range(100):
+    iter_i = pd.DataFrame([Y_p_iter_clay_log_ratio[i],Y_p_iter_silt_log_ratio[i],Y_p_iter_sand_log_ratio[i]]).T
+    iter_i[iter_i<0] = 0
+    iter_i[iter_i>100] = 100
+    iter_i.to_csv(list_iter[i], index = False)
+
 #Actual
 list_iter = []
 for i in range(100):
@@ -509,6 +624,26 @@ for i in range(100):
 
 #7
 ####Check####
+path = '/home/chirag/Documents/HSI/Soil/Paper_2_Quantitative/M1'
+os.chdir(path)
+Y_iter_clay = list(np.load('Y_iter_clay.npy', allow_pickle = True))
+Y_iter_silt = list(np.load('Y_iter_silt.npy', allow_pickle = True))
+Y_iter_sand = list(np.load('Y_iter_sand.npy', allow_pickle = True))
+
+Y_p_iter_clay = list(np.load('Y_p_iter_clay.npy', allow_pickle = True))
+Y_p_iter_silt = list(np.load('Y_p_iter_silt.npy', allow_pickle = True))
+Y_p_iter_sand = list(np.load('Y_p_iter_sand.npy', allow_pickle = True))
+ 
+path = '/home/chirag/Documents/HSI/Soil/Paper_2_Quantitative/M2'
+os.chdir(path)
+Y_pp_iter_silt = list(np.load('Y_pp_iter_silt_clip.npy', allow_pickle = True))
+
+path = '/home/chirag/Documents/HSI/Soil/Paper_2_Quantitative/M3'
+os.chdir(path)
+Y_p_iter_log_ratio_clay = list(np.load('Y_p_iter_log_ratio_clay.npy', allow_pickle = True))
+Y_p_iter_log_ratio_silt = list(np.load('Y_p_iter_log_ratio_silt.npy', allow_pickle = True))
+Y_p_iter_log_ratio_sand = list(np.load('Y_p_iter_log_ratio_sand.npy', allow_pickle = True))
+
 #Clipping the predictions of clay and sand to the range of 0 to 100
 foo = Y_p_iter_clay
 Y_p_iter_clay_clip = []
@@ -528,9 +663,16 @@ for i in range(100):
     foo1 = foo[i]
     Y_p_iter_silt_clip.append(np.clip(np.asarray(foo1), a_min = 0, a_max = 100))
 
-np.save("Y_p_iter_clay_clip",Y_p_iter_clay_clip)
-np.save("Y_p_iter_sand_clip",Y_p_iter_sand_clip)
-np.save("Y_p_iter_silt_clip",Y_p_iter_silt_clip)
+
+array_dict = {f'array_{idx}': arr for idx, arr in enumerate(Y_p_iter_clay_clip)}
+np.savez_compressed('Y_p_iter_clay_clip.npz', **array_dict)
+array_dict = {f'array_{idx}': arr for idx, arr in enumerate(Y_p_iter_silt_clip)}
+np.savez_compressed('Y_p_iter_silt_clip.npz', **array_dict)
+array_dict = {f'array_{idx}': arr for idx, arr in enumerate(Y_p_iter_sand_clip)}
+np.savez_compressed('Y_p_iter_sand_clip.npz', **array_dict)
+#np.save("Y_p_iter_clay_clip",Y_p_iter_clay_clip)
+#np.save("Y_p_iter_sand_clip",Y_p_iter_sand_clip)
+#np.save("Y_p_iter_silt_clip",Y_p_iter_silt_clip)
 
 #Clipped all the files to range of 0 to 100
 foo3 = []
@@ -574,14 +716,17 @@ train_nos = np.load("train_nos.npy")
 test_nos = np.load("test_nos.npy")
 Y_iter_silt = list(np.load('Y_iter_silt.npy', allow_pickle = True))
 
+#Calculating silt as residue for M2
 Y_pp_iter_silt = []
 for i in range(100):
     Y_pp_iter_silt_foo = 100 - Y_p_iter_clay_clip[i] - Y_p_iter_sand_clip[i]
     Y_pp_iter_silt_foo[Y_pp_iter_silt_foo<0] = 0
     Y_pp_iter_silt_foo[Y_pp_iter_silt_foo>100] = 100
     Y_pp_iter_silt.append(Y_pp_iter_silt_foo)
-np.save("Y_pp_iter_silt_clip",Y_pp_iter_silt)
-pd.DataFrame(Y_pp_iter_silt).to_csv('Y_pp_iter_silt_clip.csv', index = False)
+array_dict = {f'array_{idx}': arr for idx, arr in enumerate(Y_pp_iter_silt)}
+np.savez_compressed('Y_pp_iter_silt_clip.npz', **array_dict)
+#np.save("Y_pp_iter_silt_clip",Y_pp_iter_silt)
+#pd.DataFrame(Y_pp_iter_silt).to_csv('Y_pp_iter_silt_clip.csv', index = False)
 
 metrics_silt_final_m2 = np.empty([10,100])
 for i in range(100):
@@ -590,31 +735,8 @@ for i in range(100):
     y0_p = Y_pp_iter_silt[i][0:foo]
     y1 = Y_iter_silt[i][foo:]
     y1_p = Y_pp_iter_silt[i][foo:]
-    #Calculate metrics for calibration
-    ssr_c = np.sum(np.square(y0-y0_p))
-    sst_c = np.sum(np.square(y0-np.mean(y0)))
-    r2_c = 1-(ssr_c/sst_c)
-    rmse_c = np.sqrt((np.sum(np.square(y0-y0_p)))/len(y0))
-    #Calculate rpd, rpiq, bias for calibration 
-    sd_c = np.std(y0)
-    iqr_c = np.percentile(y0,75,interpolation='midpoint') - np.percentile(y0,25,interpolation='midpoint')
-    rpd_c = sd_c/rmse_c
-    rpiq_c = iqr_c/rmse_c
-    bias_c = np.mean(y0_p) - np.mean(y0)
-    #Calculate metrics for validation
-    ssr_v = np.sum(np.square(y1-y1_p))
-    sst_v = np.sum(np.square(y1-np.mean(y1)))
-    r2_v = 1-(ssr_v/sst_v)
-    rmse_v = np.sqrt((np.sum(np.square(y1-y1_p)))/len(y1))
-    #Calculate rpd, rpiq, bias for validation
-    sd_v = np.std(y1)
-    iqr_v = np.percentile(y1,75,interpolation='midpoint') - np.percentile(y1,25,interpolation='midpoint')
-    rpd_v = sd_v/rmse_v
-    rpiq_v = iqr_v/rmse_v
-    bias_v = np.mean(y1_p) - np.mean(y1)
-    metrics_final = np.array([r2_c, rmse_c, rpd_c, rpiq_c, bias_c, r2_v, rmse_v, rpd_v, rpiq_v, bias_v])
-    metrics_silt_final_m2[:,i] = metrics_final
-
+    metrics_silt = regression_metrics(y0, y0_p, y1, y1_p)
+    metrics_silt_final_m2[:,i] = metrics_silt
 np.save("metrics_silt_final_m2",metrics_silt_final_m2)
 pd.DataFrame(metrics_silt_final_m2).to_csv('metrics_silt_final_m2.csv', index = False)
 
@@ -727,58 +849,6 @@ i
 
 
 #10
-####Plots####
-#Data Import
-#Set path
-path = '/home/chirag/Documents/HSI/Soil/Paper_2_Quantitative'
-os.chdir(path)
-file = 'Working_lab.csv'
-#Data Import
-df =  pd.read_csv(file)
-dict = {' c':'Cl', ' cl':'ClLo', ' ls':'LoSa', ' sc':'SaCl', ' scl':'SaClLo', ' sl':'SaLo'}
-df['Texture'] = df['Texture'].map(dict)
-#Removed bad bands less than 400 nm wavelength
-df = df.drop(df.iloc[:, 5:55], axis = 1)
-
-#Mean spectra for each texture
-df_tex_ref = df.groupby('Texture').mean()
-df_tex_ref.to_csv('Mean_reflectance_texture.csv')
-X = -np.log10(df.drop(['Sample_Code', 'Sand', 'Clay', 'Silt', 'Texture'], axis = 1))
-Y = pd.DataFrame(df, columns= ['Sample_Code', 'Clay', 'Silt', 'Sand', 'Texture'])
-df1 = pd.concat([Y,X], axis=1)
-df_tex_abs = df1.groupby('Texture').mean()
-df_tex_abs.to_csv('Mean_absorbance_texture.csv')
-
-#PCA from spectra
-pca = PCA(n_components=3)
-X = -np.log10(df.drop(['Sample_Code', 'Sand', 'Clay', 'Silt', 'Texture'], axis = 1))
-S1 = pca.fit_transform(X)
-explained_variance_ratio = pca.explained_variance_ratio_
-df1 = pd.concat([pd.DataFrame(S1),Y['Texture']], axis=1)
-df1.to_csv('PC_absorbance.csv')
-X = df.drop(['Sample_Code', 'Sand', 'Clay', 'Silt', 'Texture'], axis = 1)
-S2 = pca.fit_transform(X)
-df2 = pd.concat([pd.DataFrame(S2),Y['Texture']], axis=1)
-df2.to_csv('PC_reflectance.csv')
-
-#Histogram of soil fractions 
-foo = pd.DataFrame(df, columns= ['Clay', 'Silt', 'Sand'])
-# Iterate through the five airlines
-for i,name in enumerate(['Clay', 'Silt', 'Sand']):
-    # Subset to the airline
-    subset = foo.iloc[:, i]
-    # Draw the density plot
-    sns.distplot(subset, hist = False, kde = True, bins = 50,
-                 kde_kws = {'shade': True, 'linewidth': 3}, norm_hist=True,
-                 label = name)
-# Plot formatting
-plt.xlim(0,100)
-plt.xlabel('Percentage fraction')
-plt.ylabel('Density')
-
-
-
-#11
 ####Other classification Functions####
 #LR
 def c_lr(X_train2, Y_train2, X_test2, Y_test2):
@@ -899,7 +969,6 @@ pd.DataFrame(metrics_classification_rf).to_csv('metrics_classification_rf.csv', 
 np.save("metrics_classification_plsda", metrics_classification_plsda)
 np.save("tr_con_final_plsda", tr_con_final_plsda)
 np.save("t_con_final_plsda", t_con_final_plsda)
-
 
 #Writing out the confusion matrix
 seq_texture = ['Sa', 'LoSa', 'SaLo', 'SaClLo', 'SaCl', 'Cl', 'ClLo', 'Lo', 'SiCl', 'SiClLo', 'SiLo', 'Si']
@@ -1121,3 +1190,345 @@ def c_plsda(X_train2, Y_train2, X_test2, Y_test2):
     dict_sand = {'Cl':22, 'ClLo':32.5, 'LoSa':82, 'SaCl':52, 'SaClLo':60, 'SaLo':66, 'Sa':91.7}
     metrics_sand = regression_metrics(Y_train1.iloc[:,2],pd.DataFrame(Y_train_pred)[0].map(dict_sand),Y_test.iloc[:,2],pd.DataFrame(Y_test_pred)[0].map(dict_sand))    
     return metrics, tr_con, t_con, metrics_clay, metrics_silt, metrics_sand
+
+
+#11
+####Plots####
+##VIP Plots
+def plot_vip_with_std(vip_anything, fraction_name, approach_name):
+    mean_vip = np.mean(vip_anything, axis=1)
+    std_vip = np.std(vip_anything, axis=1)
+    x_range = np.arange(401, 2451, step=1)
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(x_range, mean_vip, linestyle='-', color='b', linewidth=3)
+    # Add shading for standard deviation
+    ax.fill_between(x_range, mean_vip - std_vip, mean_vip + std_vip, color='b', alpha=0.5)
+    plt.axhline(y=1.0, color='r', linestyle='--')  # VIP threshold line
+    plt.xticks(fontsize=20)
+    plt.yticks(fontsize=20)
+    plt.ylim(0, 4)
+    plt.grid(True)
+    plt.show()
+    image_format = 'png'
+    image_name = str('VIP_'+ fraction_name + '_' + approach_name +'.png')
+    print(image_name)
+    fig.savefig(image_name, format=image_format, dpi=600)
+
+plot_vip_with_std(vip_clay_final, 'clay', 'A1')
+plot_vip_with_std(vip_silt_final, 'silt', 'A1')
+plot_vip_with_std(vip_sand_final, 'sand', 'A1')
+plot_vip_with_std(vip_fraction_1_final, 'fraction1', 'A3')
+plot_vip_with_std(vip_fraction_2_final, 'fraction2', 'A3')
+plot_vip_with_std(vip_plsda_final, 'plsda', 'A4')
+
+
+#Data Import
+#Set path
+path = '/home/chirag/Documents/HSI/Soil/Paper_2_Quantitative'
+os.chdir(path)
+file = 'Working_lab.csv'
+#Data Import
+df =  pd.read_csv(file)
+dict = {' c':'Cl', ' cl':'ClLo', ' ls':'LoSa', ' sc':'SaCl', ' scl':'SaClLo', ' sl':'SaLo'}
+df['Texture'] = df['Texture'].map(dict)
+#Removed bad bands less than 400 nm wavelength
+df = df.drop(df.iloc[:, 5:55], axis = 1)
+
+#Mean spectra for each texture
+df_tex_ref = df.groupby('Texture').mean()
+df_tex_ref.to_csv('Mean_reflectance_texture.csv')
+X = -np.log10(df.drop(['Sample_Code', 'Sand', 'Clay', 'Silt', 'Texture'], axis = 1))
+Y = pd.DataFrame(df, columns= ['Sample_Code', 'Clay', 'Silt', 'Sand', 'Texture'])
+df1 = pd.concat([Y,X], axis=1)
+df_tex_abs = df1.groupby('Texture').mean()
+df_tex_abs.to_csv('Mean_absorbance_texture.csv')
+
+#PCA from spectra
+pca = PCA(n_components=3)
+X = -np.log10(df.drop(['Sample_Code', 'Sand', 'Clay', 'Silt', 'Texture'], axis = 1))
+S1 = pca.fit_transform(X)
+explained_variance_ratio = pca.explained_variance_ratio_
+df1 = pd.concat([pd.DataFrame(S1),Y['Texture']], axis=1)
+df1.to_csv('PC_absorbance.csv')
+X = df.drop(['Sample_Code', 'Sand', 'Clay', 'Silt', 'Texture'], axis = 1)
+S2 = pca.fit_transform(X)
+df2 = pd.concat([pd.DataFrame(S2),Y['Texture']], axis=1)
+df2.to_csv('PC_reflectance.csv')
+
+#Histogram of soil fractions 
+foo = pd.DataFrame(df, columns= ['Clay', 'Silt', 'Sand'])
+# Iterate through the five airlines
+for i,name in enumerate(['Clay', 'Silt', 'Sand']):
+    # Subset to the airline
+    subset = foo.iloc[:, i]
+    # Draw the density plot
+    sns.distplot(subset, hist = False, kde = True, bins = 50,
+                 kde_kws = {'shade': True, 'linewidth': 3}, norm_hist=True,
+                 label = name)
+# Plot formatting
+plt.xlim(0,100)
+plt.xlabel('Percentage fraction')
+plt.ylabel('Density')
+
+#Boxplots
+#Regression based analysis
+path = 'D:/Academics/PhD/SEM 9/Paper_2_Soil_texture_quantitative/Working_Files/Plot_files'
+os.chdir(path)
+file = 'RPD.xlsx'
+df =  pd.read_excel(file)
+labels = ['Cl (A1&A2)','Cl (A3)','Si (A1)','Si_r (A2)','Si (A3)','Sa (A1)','Sa (A3)']
+colors = ['Red','Red','Green','Green','Green','Blue','Blue']
+fig, ax = plt.subplots()
+#ax.set_title('Perfromance evaluation of regression based approaches')
+ax.set_ylabel('RPD')
+#ax.set_ylim(-0.1,1)
+ax.set_xlim(0.5,  7.5)
+ax.set_xticklabels(labels, rotation=0, fontsize=8)
+bplot = ax.boxplot(df, 1,patch_artist=True) 
+# fill with colors
+for patch, color in zip(bplot['boxes'], colors):
+    patch.set_facecolor(color)
+plt.show()
+
+image_format = 'png' # e.g .png, .svg, etc.
+image_name = '3RPD.png'
+fig.savefig(image_name, format=image_format, dpi=600)
+
+#Classification based analysis
+path = 'D:/Academics/PhD/SEM 9/Paper_2_Soil_texture_quantitative/Working_Files/Plot_files'
+os.chdir(path)
+file = 'AA.xlsx'
+df =  pd.read_excel(file)
+labels = ['A1','A2','A3','A4']
+colors = ['Red','Green','Blue','Yellow']
+fig, ax = plt.subplots()
+#ax.set_title('Perfromance evaluation of classification based approaches')
+ax.set_ylabel('AA')
+#ax.set_ylim(-0.1,1)
+ax.set_xlim(0.5,  4.5)
+ax.set_xticklabels(labels, rotation=0, fontsize=8)
+bplot = ax.boxplot(df, 1,patch_artist=True) 
+# fill with colors
+for patch, color in zip(bplot['boxes'], colors):
+    patch.set_facecolor(color)
+plt.show()
+
+image_format = 'png' # e.g .png, .svg, etc.
+image_name = '6AA.png'
+fig.savefig(image_name, format=image_format, dpi=600)
+
+##Scatterplots
+#M1
+#Set path
+path = 'D:/Academics/PhD/SEM 9/Paper_2_Soil_texture_quantitative/Working_Files/M1'
+os.chdir(path)
+
+metrics_clay_final = np.load("metrics_clay_final.npy")
+metrics_silt_final = np.load("metrics_silt_final.npy")
+metrics_sand_final = np.load("metrics_sand_final.npy")
+Y_iter_clay = np.load("Y_iter_clay.npy",allow_pickle=True)
+Y_iter_silt = np.load("Y_iter_silt.npy",allow_pickle=True)
+Y_iter_sand = np.load("Y_iter_sand.npy",allow_pickle=True)
+Y_p_iter_clay = np.load("Y_p_iter_clay.npy",allow_pickle=True)
+Y_p_iter_silt = np.load("Y_p_iter_silt.npy",allow_pickle=True)
+Y_p_iter_sand = np.load("Y_p_iter_sand.npy",allow_pickle=True)
+train_nos = np.load("train_nos.npy")
+test_nos = np.load("test_nos.npy")
+
+i = 0 #iteration no
+j = 2 #clay, silt, sand
+m_0 = 0 #Approach number
+k1 = [Y_iter_clay,Y_iter_silt,Y_iter_sand]
+k2 = [Y_p_iter_clay,Y_p_iter_silt,Y_p_iter_sand]
+l = ['clay', 'silt', 'sand']
+m = ['A1', 'A2', 'A3']
+metrics = metrics_sand_final
+
+foo = k1[j]
+foo1 = k2[j]
+y_tr = foo[i][i:train_nos[i]]
+y_p_tr = foo1[i][i:train_nos[i]]
+y_test = foo[i][train_nos[i]:(train_nos[i]+test_nos[i])]
+y_p_test = foo1[i][train_nos[i]:(train_nos[i]+test_nos[i])]
+
+x = y_tr
+y = y_p_tr
+text = "$R^{2}$ = " +str(round(metrics[3,i],2)) + "\nRMSE = " +str(round(metrics[4,i],1)) + "\nRPD = " +str(round(metrics[5,i],2)) 
+z = np.polyfit(x, y, 1)
+with plt.style.context(('ggplot')):
+    fig, ax = plt.subplots(figsize=(9, 9))
+    ax.scatter(x, y, c='red', edgecolors='k')
+    #Plot the best fit line
+    ax.plot(np.polyval(z, x), x, c='blue', linewidth=1)
+    #Plot the ideal 1:1 line
+    ax.plot(x, x, color='green', linewidth=1)
+    plt.text( 30, 10, text, fontsize=20)
+    #plt.xlabel('Measured')
+    #plt.ylabel('Predicted')
+    plt.xticks(fontsize=20)
+    plt.yticks(fontsize=20)
+    plt.show()
+image_format = 'png' # e.g .png, .svg, etc.
+image_name = str(l[j]+ '_tr_' +m[m_0]+'.png')
+print(image_name)
+fig.savefig(image_name, format=image_format, dpi=600)
+
+x = y_test
+y = y_p_test
+text = "$R^{2}$ = " +str(round(metrics[8,i],2)) + "\nRMSE = " +str(round(metrics[9,i],1)) + "\nRPD = " +str(round(metrics[10,i],2)) 
+z = np.polyfit(x, y, 1)
+with plt.style.context(('ggplot')):
+    fig, ax = plt.subplots(figsize=(9, 9))
+    ax.scatter(x, y, c='red', edgecolors='k')
+    #Plot the best fit line
+    ax.plot(np.polyval(z, x), x, c='blue', linewidth=1)
+    #Plot the ideal 1:1 line
+    ax.plot(x, x, color='green', linewidth=1)
+    plt.text( 30, 10, text,fontsize=20)
+    #plt.xlabel('Measured')
+    #plt.ylabel('Predicted')
+    plt.xticks(fontsize=20)
+    plt.yticks(fontsize=20)
+    plt.show()
+image_format = 'png' # e.g .png, .svg, etc.
+image_name = str(l[j]+ '_test_' +m[m_0]+'.png')
+print(image_name)
+fig.savefig(image_name, format=image_format, dpi=600)
+
+
+#M2
+path = 'D:/Academics/PhD/SEM 9/Paper_2_Soil_texture_quantitative/Working_Files/M2'
+os.chdir(path)
+metrics_silt_final_m2 = np.load("metrics_silt_final_m2.npy")
+Y_pp_iter_silt = np.load("Y_pp_iter_silt_clip.npy",allow_pickle=True)
+
+i = 0 #iteration no
+j = 1 #clay, silt, sand
+m_0 = 1 #Approach number
+k1 = [Y_iter_clay,Y_iter_silt,Y_iter_sand]
+#k2 = [Y_p_iter_clay,Y_p_iter_silt,Y_p_iter_sand]
+l = ['clay', 'silt', 'sand']
+m = ['A1', 'A2', 'A3']
+metrics = metrics_silt_final_m2
+
+foo = k1[1]
+foo1 = Y_pp_iter_silt
+y_tr = foo[i][i:train_nos[i]]
+y_p_tr = foo1[i][i:train_nos[i]]
+y_test = foo[i][train_nos[i]:(train_nos[i]+test_nos[i])]
+y_p_test = foo1[i][train_nos[i]:(train_nos[i]+test_nos[i])]
+
+x = y_tr
+y = y_p_tr
+text = "$R^{2}$ = " +str(round(metrics[0,i],2)) + "\nRMSE = " +str(round(metrics[1,i],1)) + "\nRPD = " +str(round(metrics[2,i],2)) 
+z = np.polyfit(x, y, 1)
+with plt.style.context(('ggplot')):
+    fig, ax = plt.subplots(figsize=(9, 9))
+    ax.scatter(x, y, c='red', edgecolors='k')
+    #Plot the best fit line
+    ax.plot(np.polyval(z, x), x, c='blue', linewidth=1)
+    #Plot the ideal 1:1 line
+    ax.plot(x, x, color='green', linewidth=1)
+    plt.text( 30, 10, text,fontsize=20)
+    #plt.xlabel('Measured')
+    #plt.ylabel('Predicted')
+    plt.xticks(fontsize=20)
+    plt.yticks(fontsize=20)
+    plt.show()
+image_format = 'png' # e.g .png, .svg, etc.
+image_name = str(l[j]+ '_tr_' +m[m_0]+'.png')
+print(image_name)
+fig.savefig(image_name, format=image_format, dpi=600)
+
+x = y_test
+y = y_p_test
+text = "$R^{2}$ = " +str(round(metrics[5,i],2)) + "\nRMSE = " +str(round(metrics[6,i],1)) + "\nRPD = " +str(round(metrics[7,i],2)) 
+z = np.polyfit(x, y, 1)
+with plt.style.context(('ggplot')):
+    fig, ax = plt.subplots(figsize=(9, 9))
+    ax.scatter(x, y, c='red', edgecolors='k')
+    #Plot the best fit line
+    ax.plot(np.polyval(z, x), x, c='blue', linewidth=1)
+    #Plot the ideal 1:1 line
+    ax.plot(x, x, color='green', linewidth=1)
+    plt.text( 30, 10, text,fontsize=20)
+    #plt.xlabel('Measured')
+    #plt.ylabel('Predicted')
+    plt.xticks(fontsize=20)
+    plt.yticks(fontsize=20)
+    plt.show()
+image_format = 'png' # e.g .png, .svg, etc.
+image_name = str(l[j]+ '_test_' +m[m_0]+'.png')
+print(image_name)
+fig.savefig(image_name, format=image_format, dpi=600)
+
+
+#M3
+path = 'D:/Academics/PhD/SEM 9/Paper_2_Soil_texture_quantitative/Working_Files/M3'
+os.chdir(path)
+metrics_clay_final_m3 = np.load("metrics_clay_final_log_ratio.npy")
+metrics_silt_final_m3 = np.load("metrics_silt_final_log_ratio.npy")
+metrics_sand_final_m3 = np.load("metrics_sand_final_log_ratio.npy")
+Y_p_iter_log_ratio_clay = np.load("Y_p_iter_log_ratio_clay.npy",allow_pickle=True)
+Y_p_iter_log_ratio_silt = np.load("Y_p_iter_log_ratio_silt.npy",allow_pickle=True)
+Y_p_iter_log_ratio_sand = np.load("Y_p_iter_log_ratio_sand.npy",allow_pickle=True)
+
+k1 = [Y_iter_clay,Y_iter_silt,Y_iter_sand]
+k2 = [Y_p_iter_log_ratio_clay,Y_p_iter_log_ratio_silt,Y_p_iter_log_ratio_sand]
+i = 0 #iteration no
+j = 2 #clay, silt, sand
+m_0 = 2 #Approach number
+l = ['clay', 'silt', 'sand']
+m = ['A1', 'A2', 'A3']
+metrics = metrics_sand_final_m3 
+
+foo = k1[j]
+foo1 = k2[j]
+y_tr = foo[i][i:train_nos[i]]
+y_p_tr = foo1[i][i:train_nos[i]]
+y_test = foo[i][train_nos[i]:(train_nos[i]+test_nos[i])]
+y_p_test = foo1[i][train_nos[i]:(train_nos[i]+test_nos[i])]
+
+x = y_tr
+y = y_p_tr
+text = "$R^{2}$ = " +str(round(metrics[0,i],2)) + "\nRMSE = " +str(round(metrics[1,i],1)) + "\nRPD = " +str(round(metrics[2,i],2)) 
+z = np.polyfit(x, y, 1)
+with plt.style.context(('ggplot')):
+    fig, ax = plt.subplots(figsize=(9, 9))
+    ax.scatter(x, y, c='red', edgecolors='k')
+    #Plot the best fit line
+    ax.plot(np.polyval(z, x), x, c='blue', linewidth=1)
+    #Plot the ideal 1:1 line
+    ax.plot(x, x, color='green', linewidth=1)
+    plt.text( 30, 10, text,fontsize=20)
+    #plt.xlabel('Measured')
+    #plt.ylabel('Predicted')
+    plt.xticks(fontsize=20)
+    plt.yticks(fontsize=20)
+    plt.show()
+image_format = 'png' # e.g .png, .svg, etc.
+image_name = str(l[j]+ '_tr_' +m[m_0]+'.png')
+print(image_name)
+fig.savefig(image_name, format=image_format, dpi=600)
+
+x = y_test
+y = y_p_test
+text = "$R^{2}$ = " +str(round(metrics[5,i],2)) + "\nRMSE = " +str(round(metrics[6,i],1)) + "\nRPD = " +str(round(metrics[7,i],2)) 
+z = np.polyfit(x, y, 1)
+with plt.style.context(('ggplot')):
+    fig, ax = plt.subplots(figsize=(9, 9))
+    ax.scatter(x, y, c='red', edgecolors='k')
+    #Plot the best fit line
+    ax.plot(np.polyval(z, x), x, c='blue', linewidth=1)
+    #Plot the ideal 1:1 line
+    ax.plot(x, x, color='green', linewidth=1)
+    plt.text( 30, 10, text,fontsize=20)
+    #plt.xlabel('Measured')
+    #plt.ylabel('Predicted')
+    plt.xticks(fontsize=20)
+    plt.yticks(fontsize=20)
+    plt.show()
+image_format = 'png' # e.g .png, .svg, etc.
+image_name = str(l[j]+ '_test_' +m[m_0]+'.png')
+print(image_name)
+fig.savefig(image_name, format=image_format, dpi=600)
