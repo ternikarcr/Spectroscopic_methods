@@ -1,6 +1,12 @@
 Spectroscopic methods for Soil Texture Classification and Quantification
 
-This repository contains one Python script and one R script for analyzing soil textures using spectroscopic data and various machine learning techniques. The script processes soil data, performs regression and classification analyses, and evaluates the results using multiple metrics. Particularly, the Python script evaluates the performance of regression-assisted classification and direct classification models using bootstrapping and various evaluation metrics such as accuracy, kappa score, and neighborhood accuracy. The models evaluated include three PLSR based models and one direct classification model PLS-DA. The files available are Regression_classification.R for converting the individual soil fraction to soil texture classes and report generation. The Regression_final.py are used for individual fraction prediction, direct texture classification and report generation. The Required data for the running of the codes could be provided via a mail request to the authors. 
+This repository contains one Python script and one R script for analyzing soil textures using spectroscopic data and various machine learning techniques.
+The script processes soil data, performs regression and classification analyses, and evaluates the results using multiple metrics. 
+Particularly, the Python script evaluates the performance of regression-assisted classification and direct classification models using bootstrapping and various evaluation metrics such as accuracy, kappa score, and neighborhood accuracy. 
+The models evaluated include three PLSR based models and one direct classification model PLS-DA. 
+The files available are Regression_classification.R for converting the individual soil fraction to soil texture classes and report generation. 
+The Regression_final.py are used for individual fraction prediction, direct texture classification and report generation. 
+The Required data for the running of the codes could be provided via a mail request to the authors. 
 
 Table of Contents
 
