@@ -48,7 +48,7 @@ loo = LeaveOneOut()
 #2 #Data Import
 #Set path
 #path = 'D:/Academics/PhD/SEM 9/Paper_2_Soil_texture_quantitative/Working_Files/Codes_final'
-path = 'C:/Users/DNK/Downloads/Foo/Draft_2'
+path = 'C:/Refined/Draft_2/Working_files'
 os.chdir(path)
 file = 'Working_lab.csv'
 #Data Import
@@ -58,6 +58,8 @@ df['Texture'] = df['Texture'].map(dict)
 #Removed bad bands less than 400 nm wavelength
 df = df.drop(df.iloc[:, 5:55], axis = 1)
 
+path = 'C:/Refined/Draft_2/Working_files/Revision'
+os.chdir(path)
 
 #3 #Definition of various functions
 #VIP scores calculation (adapted from https://github.com/scikit-learn/scikit-learn/issues/7050)
@@ -582,7 +584,7 @@ sys.stdout.close()
 sys.stdout = stdout_fileinfo
 i
 
-p.mean(metrics_clay_final, axis=1)
+np.mean(metrics_clay_final, axis=1)
 foo = np.mean(metrics_silt_final, axis=1)
 foo = np.mean(metrics_sand_final, axis=1)
 
@@ -1532,3 +1534,5 @@ image_format = 'png' # e.g .png, .svg, etc.
 image_name = str(l[j]+ '_test_' +m[m_0]+'.png')
 print(image_name)
 fig.savefig(image_name, format=image_format, dpi=600)
+
+
